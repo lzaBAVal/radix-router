@@ -1,20 +1,20 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"net/http"
+)
+
+func indexHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "GET /")
+	})
+}
 
 func main() {
+	myCustomRouter := NewRouter()
 
-	n := newNode()
-	n.Insert("/hello")
-	n.Insert("/hello/make/")
-	n.Insert("/hi/hello/main")
-	n.Insert("/hi/fix/best/")
-	n.Insert("/hi/fix/bestgroup")
-	n.Insert("/hi/something/")
-	n.Insert("/hi/fix/bestgrou")
+	myCustomRouter.Methods(http.MethodGet).Handler(`/`, indexHandler())
 
-	rt := NewRadixTraverse(n)
-	rt.Traverse()
-
-	fmt.Println(n.Search("/hi/fix/bestgro"))
+	http.ListenAndServe(":8000", myCustomRouter)
 }

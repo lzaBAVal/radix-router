@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -11,10 +12,15 @@ const (
 	pathDelimiter = "/"
 )
 
-type node struct {
+var (
+	ErrMethodNotAllowed = errors.New("Method not allowed")
+	ErrNotFound         = errors.New("Path not found")
+)
+
+type RadixTree struct {
 	label    string
-	actions  map[string]*action
-	children []*node
+	actions  map[string]http.Handler
+	children []*RadixTree
 }
 
 type action struct {
@@ -22,35 +28,43 @@ type action struct {
 }
 
 type RadixTraverse struct {
-	node *node
+	node *RadixTree
 	tab  int
 }
 
-func NewRadixTraverse(n *node) *RadixTraverse {
+func NewRadixTraverse(n *RadixTree) *RadixTraverse {
 	return &RadixTraverse{
 		node: n,
 		tab:  0,
 	}
 }
 
-func newNode() *node {
-	return &node{
-		label:    "",
-		actions:  make(map[string]*action),
-		children: make([]*node, 0),
+func newRadixTree() *RadixTree {
+	return &RadixTree{
+		label:    "/",
+		actions:  make(map[string]http.Handler),
+		children: make([]*RadixTree, 0),
 	}
 }
 
-func (n *node) Insert(path string) {
+func (n *RadixTree) Insert(methods []string, path string, handler http.Handler) {
 	labels := splitPath(path)
-	n.insert(labels)
+
+	node := n
+	if len(labels) != 0 {
+		node = n.insert(labels)
+	}
+
+	for _, method := range methods {
+		node.actions[method] = handler
+	}
 }
 
-func (n *node) insert(labels []string) {
+func (n *RadixTree) insert(labels []string) *RadixTree {
 	currNode := n
 
 	if len(labels) == 0 {
-		return
+		return currNode
 	}
 
 	for _, child := range currNode.children {
@@ -58,32 +72,30 @@ func (n *node) insert(labels []string) {
 		lenGeneralPart := len(generalPart)
 
 		if labels[0] == child.label {
-			child.insert(labels[1:])
-			return
+			return child.insert(labels[1:])
 		}
 
 		if generalPart == child.label {
 			labels[0] = labels[0][lenGeneralPart:]
-			child.insert(labels)
-			return
+			return child.insert(labels)
 		}
 
 		if lenGeneralPart > 0 {
 			child.divideLabel(lenGeneralPart)
 
 			labels[0] = labels[0][lenGeneralPart:]
-			child.insert(labels)
-			return
+			return child.insert(labels)
+
 		}
 	}
 
-	currNode.children = append(currNode.children, &node{
+	currNode.children = append(currNode.children, &RadixTree{
 		label:    labels[0],
-		actions:  make(map[string]*action),
-		children: make([]*node, 0),
+		actions:  make(map[string]http.Handler),
+		children: make([]*RadixTree, 0),
 	})
 	currNode = currNode.children[len(currNode.children)-1]
-	currNode.insert(labels[1:])
+	return currNode.insert(labels[1:])
 }
 
 func splitPath(path string) []string {
@@ -122,31 +134,48 @@ func minLength(s1, s2 string) int {
 	return int(math.Min(float64(len(s1)), float64(len(s2))))
 }
 
-func (n *node) divideLabel(lenGeneralPart int) {
+func (n *RadixTree) divideLabel(lenGeneralPart int) {
 	label := n.label
 	children := n.children
 
 	n.label = label[:lenGeneralPart]
-	n.children = []*node{{
+	n.children = []*RadixTree{{
 		label:    label[lenGeneralPart:],
-		actions:  make(map[string]*action),
+		actions:  make(map[string]http.Handler),
 		children: children,
 	}}
 
 }
 
-func (n *node) Search(path string) bool {
+func (n *RadixTree) Search(path, method string) (http.Handler, error) {
 	labels := splitPath(path)
-	return n.search(labels)
+	node := n
+	if len(labels) != 0 {
+		node = n.search(labels)
+	}
+	if node == nil {
+		return nil, ErrNotFound
+	}
+	if handler, ok := node.actions[method]; ok {
+		return handler, nil
+	}
+	return nil, ErrMethodNotAllowed
+
 }
 
-func (n *node) search(labels []string) bool {
+func (n *RadixTree) search(labels []string) *RadixTree {
+	if len(labels) == 0 {
+		return nil
+	}
+
 	for _, child := range n.children {
+		fmt.Println(child.label, labels)
 		prefix := getPrefix(child.label, labels[0])
 
-		if prefix == labels[0] {
-			if len(labels) == 1 {
-				return true
+		if labels[0] == child.label {
+
+			if len(labels) == 1 && labels[0] != "" {
+				return child
 			}
 			return child.search(labels[1:])
 		}
@@ -155,7 +184,7 @@ func (n *node) search(labels []string) bool {
 			return child.search(labels)
 		}
 	}
-	return false
+	return nil
 }
 
 func (rt *RadixTraverse) Traverse() {
